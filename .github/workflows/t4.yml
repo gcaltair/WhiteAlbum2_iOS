@@ -1,0 +1,10 @@
+name: t4
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci/macos-build]
+jobs:
+  b:
+    runs-on: macos-15
+    steps:
+      - run: echo hi

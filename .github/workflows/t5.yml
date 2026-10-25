@@ -1,0 +1,15 @@
+name: t5
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci/macos-build]
+permissions:
+  contents: read
+env:
+  GODOT_VERSION: 4.5.1-stable
+jobs:
+  b:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - run: echo hi
