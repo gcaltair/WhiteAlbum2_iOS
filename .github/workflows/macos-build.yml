@@ -1,8 +1,5 @@
 name: macOS build
 
-# Builds the Apple Silicon macOS app (and a DMG) without signing certificates.
-# The app is ad-hoc signed, exactly like tools/build_release.sh does locally, so
-# it runs on a Mac after the Gatekeeper override described in the README.
 
 on:
   workflow_dispatch:
@@ -48,8 +45,6 @@ jobs:
           python3 --version
           clang --version | head -1
 
-      # The export preset targets net9.0; the runner image may ship a different
-      # SDK, so pin 9.0 explicitly instead of trusting the preinstalled one.
       - name: Set up .NET 9
         uses: actions/setup-dotnet@v4
         with:
@@ -71,8 +66,6 @@ jobs:
           BASE="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}"
           curl -fsSL -o "/tmp/${ZIP}" "${BASE}/${ZIP}"
           unzip -q -o "/tmp/${ZIP}" -d "$GODOT_DIR"
-          # The .NET editor needs this official build; the templates zip is a
-          # separate asset and contains macos.zip for the export preset.
           curl -fsSL -o "/tmp/templates.tpz" "${BASE}/Godot_v${GODOT_VERSION}_mono_export_templates.tpz"
           mkdir -p /tmp/templates
           unzip -q -o /tmp/templates.tpz -d /tmp/templates
@@ -89,8 +82,6 @@ jobs:
             ls -la "$GODOT_DIR"
             exit 1
           fi
-          # The app bundle also holds GodotSharp/ and other helpers; only the
-          # launcher is executable *and* a Mach-O.
           BIN=""
           for candidate in "$APP"/Contents/MacOS/*; do
             if [ -x "$candidate" ] && [ -f "$candidate" ] && file "$candidate" | grep -q 'Mach-O'; then
@@ -104,8 +95,6 @@ jobs:
             exit 1
           fi
           chmod +x "$BIN"
-          # Unsigned download: drop the quarantine flag and use the ad-hoc
-          # signature the official archive already carries.
           xattr -dr com.apple.quarantine "$APP" || true
           codesign --verify --deep --strict "$APP" || codesign --force --deep --sign - "$APP"
           echo "GODOT_BIN=$BIN" >> "$GITHUB_ENV"
@@ -151,7 +140,6 @@ jobs:
       - name: Sign and verify
         run: |
           set -euo pipefail
-          # Matches tools/build_release.sh: ad-hoc identity, not notarized.
           codesign --force --deep --sign - build/WA2.app
           codesign --verify --deep --strict --verbose=2 build/WA2.app
           codesign -dv --verbose=4 build/WA2.app 2>&1 | head -20
@@ -167,7 +155,6 @@ jobs:
           lipo -archs "$BIN"/* || true
           test -d build/WA2.app/Contents/Resources/wa2 || true
           du -sh build/WA2.app
-          # No original game data may end up in the artifact.
           if find build/WA2.app -iname '*.pak' -o -iname '*.PAK' | grep -q .; then
             echo "::error::Game data (*.pak) leaked into the bundle"
             exit 1
