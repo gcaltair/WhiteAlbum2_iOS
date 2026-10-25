@@ -1,0 +1,25 @@
+name: macOS build
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "ref to build"
+        required: false
+        type: string
+  push:
+    branches:
+      - main
+      - "fix/macos-background-pause"
+    paths-ignore:
+      - "**/*.md"
+permissions:
+  contents: read
+env:
+  GODOT_VERSION: 4.5.1-stable
+jobs:
+  build:
+    name: Build macOS (arm64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
