@@ -1,7 +1,10 @@
 name: t3
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci/macos-build]
 jobs:
   b:
-    runs-on: macos-15
+    runs-on: ubuntu-latest
     steps:
       - run: echo hi
