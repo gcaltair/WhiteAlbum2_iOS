@@ -1,0 +1,106 @@
+name: t7
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci/macos-build]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile C#
+        run: dotnet build wa2.csproj -c Release
+
+      - name: Run C# fixture tests
+        run: dotnet run --project tests/LaunchOptions/LaunchOptions.csproj -c Release
+
+      - name: Run Python tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Prepare ARM64 export template
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          python3 tools/prepare_macos_template.py "$GODOT_DIR/macos.zip"
+          ls -la build/templates/
+
+      - name: Import project (first pass, generates .godot)
+        run: |
+          set -euo pipefail
+          "$GODOT_BIN" --headless --path . --import || true
+          "$GODOT_BIN" --headless --path . --editor --quit-after 200 || true
+
+      - name: Export macOS app
+        run: |
+          set -euo pipefail
+          rm -rf build/WA2.app
+          "$GODOT_BIN" --headless --path . --export-release macOS build/WA2.app
+          test -d build/WA2.app
+
+      - name: Sign and verify
+        run: |
+          set -euo pipefail
+          codesign --force --deep --sign - build/WA2.app
+          codesign --verify --deep --strict --verbose=2 build/WA2.app
+          codesign -dv --verbose=4 build/WA2.app 2>&1 | head -20
+          echo "--- nested frameworks ---"
+          find build/WA2.app/Contents/Frameworks -maxdepth 2 -name '*.dylib' -o -maxdepth 2 -name '*.framework' | head -20
+
+      - name: Sanity-check the bundle
+        run: |
+          set -euo pipefail
+          BIN="build/WA2.app/Contents/MacOS"
+          ls -la "$BIN"
+          file "$BIN"/*
+          lipo -archs "$BIN"/* || true
+          test -d build/WA2.app/Contents/Resources/wa2 || true
+          du -sh build/WA2.app
+          if find build/WA2.app -iname '*.pak' -o -iname '*.PAK' | grep -q .; then
+            echo "::error::Game data (*.pak) leaked into the bundle"
+            exit 1
+          fi
+
+      - name: Create DMG
+        run: |
+          set -euo pipefail
+          rm -rf build/dmg && mkdir -p build/dmg
+          ditto build/WA2.app build/dmg/WA2.app
+          ln -s /Applications build/dmg/Applications
+          if [ -f assets/legal/THIRD_PARTY_LICENSES.txt ]; then
+            cp assets/legal/THIRD_PARTY_LICENSES.txt build/dmg/
+          fi
+          VERSION=$(sed -n 's/^application\/short_version="\(.*\)"/\1/p' export_presets.cfg | head -1)
+          BUILD=$(sed -n 's/^application\/version="\(.*\)"/\1/p' export_presets.cfg | head -1)
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          NAME="WA2-macOS-v${VERSION}-build${BUILD}-${SHORT_SHA}"
+          mkdir -p dist
+          hdiutil create -quiet -volname "WHITE ALBUM 2" -srcfolder build/dmg -format UDZO -ov "dist/${NAME}.dmg"
+          ditto -c -k --sequesterRsrc --keepParent build/WA2.app "dist/${NAME}.zip"
+          (cd dist && shasum -a 256 -- * > SHA256SUMS.txt)
+          echo "ARTIFACT_NAME=${NAME}" >> "$GITHUB_ENV"
+          cat dist/SHA256SUMS.txt
+
+      - name: Upload app bundle (zip)
+        uses: actions/upload-artifact@v4
+        with:
+          name: WA2-macOS-${{ env.ARTIFACT_NAME }}
+          path: dist/${{ env.ARTIFACT_NAME }}.zip
+          if-no-files-found: error
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: WA2-macOS-dmg-${{ env.ARTIFACT_NAME }}
+          path: |
+            dist/${{ env.ARTIFACT_NAME }}.dmg
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            .godot/mono/temp/bin/Release/*.log
+          if-no-files-found: ignore
