@@ -12,6 +12,7 @@ on:
     branches:
       - main
       - "fix/macos-background-pause"
+      - "ci/workflow-on-main"
     paths-ignore:
       - "**/*.md"
 
