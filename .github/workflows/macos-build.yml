@@ -1,9 +1,11 @@
 name: macOS build
+
+
 on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "ref to build"
+        description: "Branch, tag or commit to build (defaults to the branch this run was started from)"
         required: false
         type: string
   push:
@@ -12,14 +14,193 @@ on:
       - "fix/macos-background-pause"
     paths-ignore:
       - "**/*.md"
+
 permissions:
   contents: read
+
 env:
   GODOT_VERSION: 4.5.1-stable
+  GODOT_DIR: ${{ github.workspace }}/.tools/godot
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+
 jobs:
   build:
     name: Build macOS (arm64)
     runs-on: macos-15
     timeout-minutes: 90
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          submodules: false
+
+      - name: Show toolchain versions
+        run: |
+          sw_vers
+          uname -m
+          xcodebuild -version
+          python3 --version
+          clang --version | head -1
+
+      - name: Set up .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Cache Godot editor
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.GODOT_DIR }}
+          key: godot-${{ env.GODOT_VERSION }}-mono-macos
+
+      - name: Download Godot 4.5.1 .NET editor
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p "$GODOT_DIR"
+          ZIP="Godot_v${GODOT_VERSION}_mono_macos.universal.zip"
+          BASE="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}"
+          curl -fsSL -o "/tmp/${ZIP}" "${BASE}/${ZIP}"
+          unzip -q -o "/tmp/${ZIP}" -d "$GODOT_DIR"
+          curl -fsSL -o "/tmp/templates.tpz" "${BASE}/Godot_v${GODOT_VERSION}_mono_export_templates.tpz"
+          mkdir -p /tmp/templates
+          unzip -q -o /tmp/templates.tpz -d /tmp/templates
+          cp "/tmp/templates/templates/macos.zip" "$GODOT_DIR/macos.zip"
+          rm -f "/tmp/${ZIP}" /tmp/templates.tpz
+          rm -rf /tmp/templates
+
+      - name: Locate Godot binary
+        run: |
+          set -euo pipefail
+          APP="$(find "$GODOT_DIR" -maxdepth 2 -name 'Godot*.app' -type d | head -1)"
+          if [ -z "$APP" ]; then
+            echo "::error::Godot .app not found in $GODOT_DIR"
+            ls -la "$GODOT_DIR"
+            exit 1
+          fi
+          BIN=""
+          for candidate in "$APP"/Contents/MacOS/*; do
+            if [ -x "$candidate" ] && [ -f "$candidate" ] && file "$candidate" | grep -q 'Mach-O'; then
+              BIN="$candidate"
+              break
+            fi
+          done
+          if [ -z "$BIN" ]; then
+            echo "::error::No Mach-O launcher found in $APP/Contents/MacOS"
+            ls -la "$APP/Contents/MacOS"
+            exit 1
+          fi
+          chmod +x "$BIN"
+          xattr -dr com.apple.quarantine "$APP" || true
+          codesign --verify --deep --strict "$APP" || codesign --force --deep --sign - "$APP"
+          echo "GODOT_BIN=$BIN" >> "$GITHUB_ENV"
+          echo "Found $BIN"
+
+      - name: Verify Godot and export templates
+        run: |
+          set -euo pipefail
+          "$GODOT_BIN" --version
+          "$GODOT_BIN" --headless --version
+          test -f "$GODOT_DIR/macos.zip"
+          unzip -l "$GODOT_DIR/macos.zip" | head -20
+
+      - name: Compile C#
+        run: dotnet build wa2.csproj -c Release
+
+      - name: Run C# fixture tests
+        run: dotnet run --project tests/LaunchOptions/LaunchOptions.csproj -c Release
+
+      - name: Run Python tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Prepare ARM64 export template
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          python3 tools/prepare_macos_template.py "$GODOT_DIR/macos.zip"
+          ls -la build/templates/
+
+      - name: Import project (first pass, generates .godot)
+        run: |
+          set -euo pipefail
+          "$GODOT_BIN" --headless --path . --import || true
+          "$GODOT_BIN" --headless --path . --editor --quit-after 200 || true
+
+      - name: Export macOS app
+        run: |
+          set -euo pipefail
+          rm -rf build/WA2.app
+          "$GODOT_BIN" --headless --path . --export-release macOS build/WA2.app
+          test -d build/WA2.app
+
+      - name: Sign and verify
+        run: |
+          set -euo pipefail
+          codesign --force --deep --sign - build/WA2.app
+          codesign --verify --deep --strict --verbose=2 build/WA2.app
+          codesign -dv --verbose=4 build/WA2.app 2>&1 | head -20
+          echo "--- nested frameworks ---"
+          find build/WA2.app/Contents/Frameworks -maxdepth 2 -name '*.dylib' -o -maxdepth 2 -name '*.framework' | head -20
+
+      - name: Sanity-check the bundle
+        run: |
+          set -euo pipefail
+          BIN="build/WA2.app/Contents/MacOS"
+          ls -la "$BIN"
+          file "$BIN"/*
+          lipo -archs "$BIN"/* || true
+          test -d build/WA2.app/Contents/Resources/wa2 || true
+          du -sh build/WA2.app
+          if find build/WA2.app -iname '*.pak' -o -iname '*.PAK' | grep -q .; then
+            echo "::error::Game data (*.pak) leaked into the bundle"
+            exit 1
+          fi
+
+      - name: Create DMG
+        run: |
+          set -euo pipefail
+          rm -rf build/dmg && mkdir -p build/dmg
+          ditto build/WA2.app build/dmg/WA2.app
+          ln -s /Applications build/dmg/Applications
+          if [ -f assets/legal/THIRD_PARTY_LICENSES.txt ]; then
+            cp assets/legal/THIRD_PARTY_LICENSES.txt build/dmg/
+          fi
+          VERSION=$(sed -n 's/^application\/short_version="\(.*\)"/\1/p' export_presets.cfg | head -1)
+          BUILD=$(sed -n 's/^application\/version="\(.*\)"/\1/p' export_presets.cfg | head -1)
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          NAME="WA2-macOS-v${VERSION}-build${BUILD}-${SHORT_SHA}"
+          mkdir -p dist
+          hdiutil create -quiet -volname "WHITE ALBUM 2" -srcfolder build/dmg -format UDZO -ov "dist/${NAME}.dmg"
+          ditto -c -k --sequesterRsrc --keepParent build/WA2.app "dist/${NAME}.zip"
+          (cd dist && shasum -a 256 -- * > SHA256SUMS.txt)
+          echo "ARTIFACT_NAME=${NAME}" >> "$GITHUB_ENV"
+          cat dist/SHA256SUMS.txt
+
+      - name: Upload app bundle (zip)
+        uses: actions/upload-artifact@v4
+        with:
+          name: WA2-macOS-${{ env.ARTIFACT_NAME }}
+          path: dist/${{ env.ARTIFACT_NAME }}.zip
+          if-no-files-found: error
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: WA2-macOS-dmg-${{ env.ARTIFACT_NAME }}
+          path: |
+            dist/${{ env.ARTIFACT_NAME }}.dmg
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            .godot/mono/temp/bin/Release/*.log
+          if-no-files-found: ignore
