@@ -1,0 +1,56 @@
+name: t9
+
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or commit to build (defaults to the branch this run was started from)"
+        required: false
+        type: string
+  push:
+    branches:
+      - main
+      - "fix/macos-background-pause"
+    paths-ignore:
+      - "**/*.md"
+
+permissions:
+  contents: read
+
+env:
+  GODOT_VERSION: 4.5.1-stable
+  GODOT_DIR: ${{ github.workspace }}/.tools/godot
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+
+jobs:
+  build:
+    name: Build macOS (arm64)
+    runs-on: macos-15
+    timeout-minutes: 90
+
+    steps:      - name: Cache Godot editor
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.GODOT_DIR }}
+          key: godot-${{ env.GODOT_VERSION }}-mono-macos
+
+      - name: Download Godot 4.5.1 .NET editor
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p "$GODOT_DIR"
+          ZIP="Godot_v${GODOT_VERSION}_mono_macos.universal.zip"
+          BASE="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}"
+          curl -fsSL -o "/tmp/${ZIP}" "${BASE}/${ZIP}"
+          unzip -q -o "/tmp/${ZIP}" -d "$GODOT_DIR"
+          curl -fsSL -o "/tmp/templates.tpz" "${BASE}/Godot_v${GODOT_VERSION}_mono_export_templates.tpz"
+          mkdir -p /tmp/templates
+          unzip -q -o /tmp/templates.tpz -d /tmp/templates
+          cp "/tmp/templates/templates/macos.zip" "$GODOT_DIR/macos.zip"
+          rm -f "/tmp/${ZIP}" /tmp/templates.tpz
+          rm -rf /tmp/templates
+
+      - run: echo done

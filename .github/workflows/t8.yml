@@ -1,0 +1,52 @@
+name: t8
+
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or commit to build (defaults to the branch this run was started from)"
+        required: false
+        type: string
+  push:
+    branches:
+      - main
+      - "fix/macos-background-pause"
+    paths-ignore:
+      - "**/*.md"
+
+permissions:
+  contents: read
+
+env:
+  GODOT_VERSION: 4.5.1-stable
+  GODOT_DIR: ${{ github.workspace }}/.tools/godot
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+
+jobs:
+  build:
+    name: Build macOS (arm64)
+    runs-on: macos-15
+    timeout-minutes: 90
+
+    steps:      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          submodules: false
+
+      - name: Show toolchain versions
+        run: |
+          sw_vers
+          uname -m
+          xcodebuild -version
+          python3 --version
+          clang --version | head -1
+
+      - name: Set up .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - run: echo done
