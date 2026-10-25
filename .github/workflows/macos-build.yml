@@ -17,7 +17,6 @@ on:
       - "fix/macos-background-pause"
     paths-ignore:
       - "**/*.md"
-      - ".github/**"
 
 permissions:
   contents: read
