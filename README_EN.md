@@ -90,6 +90,8 @@ Launch the app, tap **Main** or **Special Contents**, choose a language and pres
 
 Before playing, turn off **Show corner menu / 显示右上角菜单** to hide the **≡** button. It is enabled by default; pressing Play saves your choice, and you can enable it again on the next launch. The Apple port adds this button and its pause panel. The original Save, Load, Options, Backlog, Auto, Skip and Hide controls remain available when it is hidden. Returning to the title uses the pause menu; enable the corner button on the next launch if needed.
 
+On macOS, you can also turn off **Pause on focus loss / 失去焦点时自动暂停** in the launcher. It is enabled by default to pause audio, video and animations and lower power consumption when the game loses focus; turn it off if you want playback to continue while working in other windows. Pressing Play persists your choice.
+
 ## Controls
 
 | Action | Touch | Siri Remote | Keyboard / mouse |

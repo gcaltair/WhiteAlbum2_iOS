@@ -172,6 +172,16 @@ func run_review():
     else:
         check(not paused and loop_settings() == expected, "Deleted paused audio is skipped safely")
 
+    # Disabling the focus-pause preference keeps playback and loop settings active in background.
+    game.set("PauseOnFocusLoss", false)
+    game.notification(MainLoop.NOTIFICATION_APPLICATION_FOCUS_OUT)
+    check(not paused, "Disabling focus loss pause leaves scene tree running")
+    check(loop_settings() == expected, "Disabling focus loss pause avoids throttling engine loop")
+    check(audio.playing and not audio.stream_paused, "Audio continues playing when focus pause is disabled")
+    game.notification(MainLoop.NOTIFICATION_APPLICATION_FOCUS_IN)
+    check(not paused and audio.playing and not audio.stream_paused, "Foreground returns cleanly with disabled focus pause")
+    game.set("PauseOnFocusLoss", true)
+
     # Exit the real game scene while it owns the background pause.
     game.notification(MainLoop.NOTIFICATION_APPLICATION_FOCUS_OUT)
     root.remove_child(game)

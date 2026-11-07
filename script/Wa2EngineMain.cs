@@ -61,6 +61,7 @@ public partial class Wa2EngineMain : Control
 	public bool AutoMode = false;
 	public bool NovelMode = false;
 	public bool ShowTouchMenu = true;
+	public bool PauseOnFocusLoss = true;
 	public bool ClickedInWait;
 	public int CurMessageIdx;
 	public static Wa2EngineMain Engine;
@@ -435,10 +436,14 @@ public partial class Wa2EngineMain : Control
 			// macOS may deliver both an application and a window focus event.
 			if (what == NotificationApplicationFocusOut ||
 				what == NotificationWMWindowFocusOut)
-				PauseForFocusLoss();
+			{
+				if (PauseOnFocusLoss) PauseForFocusLoss();
+			}
 			else if (what == NotificationApplicationFocusIn ||
 				what == NotificationWMWindowFocusIn)
+			{
 				ResumeAfterFocus();
+			}
 		}
 		if (what == 1007)
 		{
@@ -449,7 +454,7 @@ public partial class Wa2EngineMain : Control
 	private void PauseForFocusLoss()
 	{
 		// Never claim ownership of a pause initiated elsewhere.
-		if (_pausedForFocusLoss || !IsInsideTree() || GetTree().Paused)
+		if (!PauseOnFocusLoss || _pausedForFocusLoss || !IsInsideTree() || GetTree().Paused)
 			return;
 
 		// Godot unpauses AudioStreamPlayer streams when the tree resumes.

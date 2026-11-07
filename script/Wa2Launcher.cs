@@ -8,6 +8,7 @@ public partial class Wa2Launcher : Control
     private LineEdit _directory;
     private OptionButton _language;
     private CheckButton _showTouchMenu;
+    private CheckButton _pauseOnFocusLoss;
     private Label _status;
     private Wa2AssetLoader _loader;
     private Wa2LaunchOptions _options;
@@ -63,6 +64,12 @@ public partial class Wa2Launcher : Control
                 ButtonPressed = true, CustomMinimumSize = buttonSize };
             box.AddChild(_showTouchMenu);
         }
+        if (OS.GetName() == "macOS")
+        {
+            _pauseOnFocusLoss = new CheckButton { Name = "PauseOnFocusLoss", Text = "Pause on focus loss / 失去焦点时自动暂停",
+                ButtonPressed = true, CustomMinimumSize = buttonSize };
+            box.AddChild(_pauseOnFocusLoss);
+        }
         // Play and the licence viewer share a row so the launcher fits 720 px at phone font sizes.
         var actions = new HBoxContainer();
         actions.AddThemeConstantOverride("separation", 16);
@@ -88,6 +95,7 @@ public partial class Wa2Launcher : Control
                 defaultDirectory = Path.Combine(documents, Path.GetFileName(defaultDirectory.TrimEnd(Path.DirectorySeparatorChar)));
         }
         if (_showTouchMenu != null) _showTouchMenu.ButtonPressed = config.GetValue("game", "show_touch_menu", true).AsBool();
+        if (_pauseOnFocusLoss != null) _pauseOnFocusLoss.ButtonPressed = config.GetValue("game", "pause_on_focus_loss", true).AsBool();
         try
         {
             _options = Wa2LaunchOptions.Parse(OS.GetCmdlineUserArgs(), defaultDirectory);
@@ -132,12 +140,14 @@ public partial class Wa2Launcher : Control
             if (scene == null) throw new InvalidDataException("Cannot load game scene. Check the engine log.");
             game = scene.Instantiate<Wa2EngineMain>();
             game.ShowTouchMenu = _showTouchMenu?.ButtonPressed ?? true;
+            game.PauseOnFocusLoss = _pauseOnFocusLoss?.ButtonPressed ?? true;
             GetTree().Root.AddChild(game);
             GetTree().CurrentScene = game;
             var config = new ConfigFile();
             config.SetValue("game", "directory", data.Directory);
             config.SetValue("game", "language", data.Language);
             if (_showTouchMenu != null) config.SetValue("game", "show_touch_menu", game.ShowTouchMenu);
+            if (_pauseOnFocusLoss != null) config.SetValue("game", "pause_on_focus_loss", game.PauseOnFocusLoss);
             Error saveError = config.Save("user://launcher.cfg");
             if (saveError != Error.Ok) throw new IOException($"Cannot save launcher settings: {saveError}");
             if (!string.IsNullOrEmpty(_options?.StartScript))

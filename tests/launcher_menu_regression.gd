@@ -31,9 +31,16 @@ func run() -> void:
     var toggle: CheckButton = scene.find_child("ShowTouchMenu", true, false)
     await require(toggle != null and toggle.button_pressed, "Legacy config must default to a visible corner menu")
 
+    var is_macos := OS.get_name() == "macOS"
+    var focus_toggle: CheckButton = scene.find_child("PauseOnFocusLoss", true, false)
+    if is_macos:
+        await require(focus_toggle != null and focus_toggle.button_pressed, "Legacy config must default to pause on focus loss on macOS")
+
     # The launcher applies and saves both directions of the preference.
     for show_menu in [false, true]:
         toggle.button_pressed = show_menu
+        if is_macos and focus_toggle != null:
+            focus_toggle.button_pressed = show_menu
         RenderingServer.force_draw(false)
         root.get_texture().get_image().save_png("res://build/launcher-menu-%s.png" % str(show_menu))
         scene.call("Play")
@@ -43,21 +50,28 @@ func run() -> void:
         await frames()
         var button = game.get("AdvMain").get_node_or_null("TouchMenuButton")
         await require((button != null) == show_menu, "Corner menu visibility differs from launcher selection")
+        if is_macos:
+            await require(game.get("PauseOnFocusLoss") == show_menu, "PauseOnFocusLoss differs from launcher selection")
         var saved := ConfigFile.new()
         await require(saved.load("user://launcher.cfg") == OK, "Launcher config was not saved")
         await require(saved.get_value("game", "show_touch_menu") == show_menu, "Menu preference was not persisted")
+        if is_macos:
+            await require(saved.get_value("game", "pause_on_focus_loss") == show_menu, "Pause on focus loss preference was not persisted")
 
         # A new launcher reads the saved value and lets the user enable it again.
         var reopened := launcher()
         await frames()
         var restored: CheckButton = reopened.find_child("ShowTouchMenu", true, false)
         await require(restored.button_pressed == show_menu, "New launcher did not restore the menu preference")
+        if is_macos:
+            var restored_focus: CheckButton = reopened.find_child("PauseOnFocusLoss", true, false)
+            await require(restored_focus != null and restored_focus.button_pressed == show_menu, "New launcher did not restore pause-on-focus preference")
         reopened.queue_free()
         game.queue_free()
         await frames()
         current_scene = scene
         scene.show()
-    print("WA2_LAUNCHER_MENU passed: legacy default, hidden/visible game button, saved preference and launcher reload")
+    print("WA2_LAUNCHER_MENU passed: legacy default, hidden/visible game button, focus-pause toggle, saved preference and launcher reload")
     for child in root.get_children(): child.queue_free()
     await frames()
     quit(0)
